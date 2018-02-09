@@ -37,8 +37,6 @@ where `[description1]` will be replaced XGen node(.e.g, if you have `xspline` XG
 
 ## How to run.
 
-```
-
 Add `$maya/lib` to `LD_LIBRARY_PATH`, then
 
 ```
