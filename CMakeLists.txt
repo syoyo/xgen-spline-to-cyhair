@@ -21,7 +21,7 @@ if (MSVC)
   add_definitions( "-DNOMINMAX" )
 endif ()
 
-set (LUCIA_CORE_SOURCE
+set (XG_SPLINE_CONVERTER_CORE_SOURCE
     ${CMAKE_SOURCE_DIR}/src/main.cc
     )
 
@@ -32,7 +32,7 @@ link_directories(${XGEN_DIR}/../../lib)
 
 # [Executable] 
 add_executable (xg-spline-to-cyhair
-    ${LUCIA_CORE_SOURCE}
+    ${XG_SPLINE_CONVERTER_CORE_SOURCE}
 )
 
 set (XGEN_LIBRARY AdskXGen)
