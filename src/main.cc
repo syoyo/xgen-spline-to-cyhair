@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2018 Syoyo Fujita
+Copyright (c) 2018-2019 Syoyo Fujita
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,8 @@ SOFTWARE.
 #include <XGen/SgCurve.h>
 #include <XGen/XgSplineAPI.h>
 
+#include "cxxopts.hpp"
+
 // Export XgenSpline to Cyhair format.
 
 // Cyhair
@@ -56,9 +58,13 @@ struct CyhairHeader
 //
 // Save curves as CyHair format.
 //
-bool SaveAsCyhair(const std::string &filename,
-    std::vector<float> points,
-    std::vector<uint32_t> num_points)
+static bool SaveAsCyhair(const std::string &filename,
+    std::vector<float> &points,
+    std::vector<float> &radiuss,
+    std::vector<float> &texcoords,
+    std::vector<uint32_t> &num_points,
+    const bool _export_radiuss = true,
+    const bool _export_texcoords = true)
 {
   CyhairHeader header;
 
@@ -67,17 +73,29 @@ bool SaveAsCyhair(const std::string &filename,
     return false;
   }
 
+  const bool export_radiuss = _export_radiuss && (radiuss.size() > 0);
+  const bool export_texcoords = _export_texcoords && (texcoords.size() > 0);
+
   header.signagure[0] = 'H';
   header.signagure[1] = 'A';
   header.signagure[2] = 'I';
   header.signagure[3] = 'R';
 
-  // 0x1 = has_segments
-  // 0x2 = has_points
-  // 0x4 = has_thickness
-  // 0x8 = has_transparency
+  // 0x01 = has_segments
+  // 0x02 = has_points
+  // 0x04 = has_thickness
+  // 0x08 = has_transparency
   // 0x10 = has_color
+  // 0x20 = has_texcoords(my extension)
   header.flags = 0x1 | 0x2;
+
+  if (export_radiuss) {
+    header.flags |= 0x04;
+  }
+
+  if (export_texcoords) {
+    header.flags |= 0x20;
+  }
 
   header.d_segments = 0; // no default segments.
   header.d_thickness = 1.0f; // FIXME(syoyo)
@@ -116,38 +134,95 @@ bool SaveAsCyhair(const std::string &filename,
   // write points.
   ofs.write(reinterpret_cast<const char*>(points.data()), points.size() * sizeof(float));
 
+  if (export_radiuss) {
+    std::cout << "export widths : " << radiuss.size() << std::endl;
+    ofs.write(reinterpret_cast<const char*>(radiuss.data()), radiuss.size() * sizeof(float));
+  }
+
+  if (export_texcoords) {
+    std::cout << "export texcoords" << std::endl;
+    ofs.write(reinterpret_cast<const char*>(texcoords.data()), texcoords.size() * sizeof(float));
+  }
+
   ofs.close();
 
   return true;
 }
 
 int main(int argc, char** argv) {
-  XGenSplineAPI::XgFnSpline splines;
 
-  if (argc < 3) {
-    std::cerr << argv[0] << " <input.xgen.bin> <output.cyhair> (num_strands)" << std::endl;
-    std::cerr << "Needs input xgen binary filename and output cyhair filename" << std::endl;
+  cxxopts::Options options("xgen-spline-lto-cyhair", "XGen IG Spline to CyHair converter");
+  options.add_options()("n,num_strands", "# of strands to convert", cxxopts::value<int>());
+  options.add_options()("i,input", "input xgen file",
+                        cxxopts::value<std::string>());
+  options.add_options()("o,output", "output file",
+                        cxxopts::value<std::string>());
+
+  options.add_options()("w,output_width", "Output width data", cxxopts::value<bool>()->default_value("true"));
+  options.add_options()("u,output_uv", "Output UV data", cxxopts::value<bool>()->default_value("false"));
+  options.add_options()("p,phantom_points", "Add phantom points(control vertex at tip and root. See XGen + Arnold for details)", cxxopts::value<bool>()->default_value("false"));
+  options.add_options()("c,cv_repeat", "Repat twice for the first and last CV. Good for RenderMan-like curve format", cxxopts::value<bool>()->default_value("true"));
+  options.add_options()("h,help", "Show help");
+
+  options.parse_positional({"input", "output"});
+
+  auto result = options.parse(argc, argv);
+
+  if (result.count("help")) {
+    std::cout << options.help({"", "group"}) << std::endl;
     return EXIT_FAILURE;
   }
 
-  int num_strands = -1; // -1 = export all strands. 
-  if (argc > 3) {
-    num_strands = atoi(argv[3]);
-    if ((num_strands == 0) || (num_strands < -1)) {
-      std::cerr << "Invalid num_strands value: " << num_strands << std::endl;
-    }
+  if (!result.count("input")) {
+    std::cout << "input filename is missing" << std::endl;
+    return EXIT_FAILURE;
   }
+
+  if (!result.count("output")) {
+    std::cout << "output filename is missing" << std::endl;
+    return EXIT_FAILURE;
+  }
+    
+  std::string input_filename = result["input"].as<std::string>();
+  std::string output_filename = result["output"].as<std::string>();
+
+
+  int num_strands = -1; // -1 = export all strands. 
+  if (result.count("num_strands")) {
+    num_strands = result["num_strands"].as<int>();
+  }
+
+  if ((num_strands == 0) || (num_strands < -1)) {
+    std::cerr << "Invalid num_strands value: " << num_strands << std::endl;
+    return EXIT_FAILURE;
+  }
+
   if (num_strands == -1) {
     std::cout << "Export all strands" << std::endl;
   } else {
     std::cout << "Export " << num_strands << " strands" << std::endl;
   }
 
+  bool output_width = result["output_width"].as<bool>();
+  bool output_uv = result["output_uv"].as<bool>();
+  bool phantom_points = result["phantom_points"].as<bool>();
+  bool cv_repeat = result["cv_repeat"].as<bool>();
+
+  if (!result.count("output")) {
+    std::cout << "output filename is missing" << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  std::cout << "Output width   : " << output_width << std::endl;
+  std::cout << "Output UV      : " << output_uv << std::endl;
+  std::cout << "Phantom points : " << phantom_points << std::endl;
+  std::cout << "CV repeat      : " << cv_repeat << std::endl;
+
   std::stringstream ss;
   {
-    std::ifstream ifs(argv[1]);
+    std::ifstream ifs(input_filename);
     if (!ifs) {
-      std::cerr << "Failed to open " << argv[1] << std::endl;
+      std::cerr << "Failed to open : " << input_filename << std::endl;
       return EXIT_FAILURE;
     }
 
@@ -156,6 +231,8 @@ int main(int argc, char** argv) {
 
   const float sample_time = 0.0f;
   const size_t sample_size = ss.str().size();
+
+  XGenSplineAPI::XgFnSpline splines;
 
   if (!splines.load(ss, sample_size, sample_time)) {
     std::cerr << "Failed to load XGen spline " << argv[1] << std::endl;
@@ -170,8 +247,10 @@ int main(int argc, char** argv) {
   std::vector<std::vector<float> > points_array;
 
   // TODO(syoyo): Create array for each spline primitive and do not create 1D global array.
-  std::vector<float> uvcoords;
+  std::vector<float> patch_uvs;
+  std::vector<float> texcoords;
   std::vector<float> points;
+  std::vector<float> radiuss;
   std::vector<uint32_t> num_points;
 
   XGenSplineAPI::XgItSpline it = splines.iterator();
@@ -179,14 +258,17 @@ int main(int argc, char** argv) {
   for (; !it.isDone(); it.next()) {
 
     const uint32_t stride = it.primitiveInfoStride();
+    std::cout << "stride = " << stride << std::endl;
 
     const uint32_t primitiveCount = it.primitiveCount();
     const uint32_t* primitiveInfos = it.primitiveInfos();
 
-    const SgVec3f* positions = it.positions(0);
-    const float* width = it.width();
-    const SgVec2f* texcoords = it.texcoords();
-    const SgVec2f* patchUVs = it.patchUVs();
+    int motion = 0; // TODO(syoyo):
+
+    const SgVec3f* positions = it.positions(motion);
+    const float* widths = it.width(motion);
+    const SgVec2f* in_texcoords = it.texcoords(motion);
+    const SgVec2f* patchUVs = it.patchUVs(motion);
 
     for (uint32_t i = 0; i < primitiveCount; i++) {
       if (num_strands > 0) {
@@ -199,34 +281,108 @@ int main(int argc, char** argv) {
       const uint32_t offset = primitiveInfos[i * stride];
       const uint32_t length = primitiveInfos[i * stride + 1];
 
-      num_points.push_back(
-          length);  // TODO(syoyo) +2 for phantom points at each end point of a curve.
+      //std::cout << "offset = " << offset << ", length = " << length << std::endl;
 
-      uvcoords.push_back(patchUVs[offset][0]);
-      uvcoords.push_back(patchUVs[offset][1]);
+      if (phantom_points) {
+        num_points.push_back(
+            length + 2); // +2 = phantom points
+      } else if (cv_repeat) {
+        num_points.push_back(
+            length + 2 + 2); // +2 for the first, another +2 for the last
+      } else {
+        num_points.push_back(
+            length);
+      }
 
-      // TODO(syoyo): Consider phantom points?
+      // add phantom points at the beginning.
+      if (phantom_points) {
+        points.push_back(positions[offset][0] + (positions[offset][0] - positions[offset+1][0]));
+        points.push_back(positions[offset][1] + (positions[offset][1] - positions[offset+1][1]));
+        points.push_back(positions[offset][2] + (positions[offset][2] - positions[offset+1][2]));
+
+        radiuss.push_back(0.5f * (widths[offset] + (widths[offset] - widths[offset+1])));
+
+        texcoords.push_back(in_texcoords[offset][0] + (in_texcoords[offset][0] - in_texcoords[offset+1][0]));
+        texcoords.push_back(in_texcoords[offset][1] + (in_texcoords[offset][1] - in_texcoords[offset+1][1]));
+      } else if (cv_repeat) {
+        points.push_back(positions[offset][0]);
+        points.push_back(positions[offset][1]);
+        points.push_back(positions[offset][2]);
+
+        points.push_back(positions[offset][0]);
+        points.push_back(positions[offset][1]);
+        points.push_back(positions[offset][2]);
+
+        radiuss.push_back(0.5f * widths[offset]);
+        radiuss.push_back(0.5f * widths[offset]);
+
+        texcoords.push_back(in_texcoords[offset][0]);
+        texcoords.push_back(in_texcoords[offset][1]);
+        texcoords.push_back(in_texcoords[offset][0]);
+        texcoords.push_back(in_texcoords[offset][1]);
+      }
+
       // points.push_baack(phantompoints);
 
       for (uint32_t k = 0; k < length; k++) {
-        points.push_back(positions[offset + k][0]);
-        points.push_back(positions[offset + k][1]);
-        points.push_back(positions[offset + k][2]);
-        // TODO(Radius, wcoord, directions, orientations)
+        const size_t idx = offset + k;
+        points.push_back(positions[idx][0]);
+        points.push_back(positions[idx][1]);
+        points.push_back(positions[idx][2]);
+        //std::cout << "p = " << positions[idx][0] << ", " << positions[idx][1] << ", " << positions[idx][2] << std::endl;
+
+        radiuss.push_back(widths[idx] * 0.5f);
+        //std::cout << "width[" << idx << "] = " << widths[idx] << std::endl;
+        texcoords.push_back(in_texcoords[offset + k][0]);
+        texcoords.push_back(in_texcoords[offset + k][1]);
+
+        //std::cout << "uvs[" << idx << "] = " << patchUVs[idx][0] << ", " << patchUVs[idx][1] << std::endl;
+
       }
+
+      // add phantom points at the end.
+      if (phantom_points) {
+        size_t idx = offset + length - 1;
+        points.push_back(positions[idx][0] + (positions[idx][0] - positions[idx-1][0]));
+        points.push_back(positions[idx][1] + (positions[idx][1] - positions[idx-1][1]));
+        points.push_back(positions[idx][2] + (positions[idx][2] - positions[idx-1][2]));
+
+        radiuss.push_back(0.5f * (widths[idx] + (widths[idx] - widths[idx-1])));
+
+        texcoords.push_back(in_texcoords[idx][0] + (in_texcoords[idx][0] - in_texcoords[idx-1][0]));
+        texcoords.push_back(in_texcoords[idx][1] + (in_texcoords[idx][1] - in_texcoords[idx-1][1]));
+      } else if (cv_repeat) {
+        points.push_back(positions[offset][0]);
+        points.push_back(positions[offset][1]);
+        points.push_back(positions[offset][2]);
+
+        points.push_back(positions[offset][0]);
+        points.push_back(positions[offset][1]);
+        points.push_back(positions[offset][2]);
+
+        radiuss.push_back(0.5f * widths[offset]);
+        radiuss.push_back(0.5f * widths[offset]);
+
+        texcoords.push_back(in_texcoords[offset][0]);
+        texcoords.push_back(in_texcoords[offset][1]);
+        texcoords.push_back(in_texcoords[offset][0]);
+        texcoords.push_back(in_texcoords[offset][1]);
+      }
+
     }
 
   }
 
   std::cout << "sampleCount " << splines.sampleCount() << std::endl;
   std::cout << "num_points " << num_points.size() << std::endl;
+  std::cout << "radiuss " << radiuss.size() << std::endl;
+  std::cout << "texcoords " << texcoords.size() << std::endl;
   std::cout << "points " << points.size() / 3 << std::endl;
 
   // Assume static scene.
   assert(splines.sampleCount() == 1);
 
-  std::string output_filename(argv[2]);
-  bool ret = SaveAsCyhair(output_filename, points, num_points);
+  bool ret = SaveAsCyhair(output_filename, points, radiuss, texcoords, num_points, output_width, output_uv);
   if (!ret) {
     return EXIT_FAILURE;
   }

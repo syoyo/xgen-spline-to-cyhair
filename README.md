@@ -40,28 +40,50 @@ where `[description1]` will be replaced XGen node(.e.g, if you have `xspline` XG
 Add `$maya/lib` to `LD_LIBRARY_PATH`, then
 
 ```
-$ xgen-spline-to-cyhair /path/to/export.xgen output.cyhair (num_strands)
+$ xgen-spline-to-cyhair -i /path/to/export.xgen -o output.cyhair
 ```
 
-You can control the number of strands(splines) to convert in the optional third parameter.
-Default is `-1`(= convert all strands)
+You can control the number of strands(splines) to convert, output withds/uvs.
+See details with `--help`
 
 
 ## Optional Workflow
 
 You can optionally convert CyHair data to (extended glTF) format using https://github.com/syoyo/tinygltfloader/tree/master/examples/cyhair_to_gltf
 
+## Features
+
+* [x] Output per-vertex width.
+* [x] Output texcoords(as an extension)
+* [x] CV repeat(default)
+
+## CV repeat
+
+`--cv_repeat` option.
+
+CV repeat feature will repeat the first and the last CV twice when exporting curve data. This feature is default behavior of xgen-spline-to-cyhair.
+
+This will maintain the last and the last CV position when the curve has been reconstructed as Cubic Bezier curve by interpreting exported CV as b-spline.
+
+See details here:
+ 
+http://www.fundza.com/rman_curves/add_attribute/index.html
+
 ## TODO
 
-* [ ] Convert UV, widith, other additional attributes.
+* [ ] Patch UVs
 * [ ] macOS support
 * [ ] Windows support
+* [ ] RiCurves format export
 
 ## LICENSE
 
 MIT license.
 
-## References
+### Third party licenses.
 
+* cxxopts.hpp MIT license: https://github.com/jarro2783/cxxopts
+
+## References
 
 * Access interactive grooming spline data using the XGen API https://knowledge.autodesk.com/support/maya/learn-explore/caas/CloudHelp/cloudhelp/2017/ENU/Maya/files/GUID-23DD8241-2736-4E3B-AFDB-A77E7E4A4DD6-htm.html
